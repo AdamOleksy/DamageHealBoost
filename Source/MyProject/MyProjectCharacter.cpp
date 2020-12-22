@@ -31,6 +31,7 @@ AMyProjectCharacter::AMyProjectCharacter()
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f); // ...at this rotation rate
 	GetCharacterMovement()->JumpZVelocity = 600.f;
 	GetCharacterMovement()->AirControl = 0.2f;
+	GetCharacterMovement()->MaxWalkSpeed = PlayerBaseWalkSpeed;
 
 	// Create a camera boom (pulls in towards the player if there is a collision)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -147,26 +148,32 @@ void AMyProjectCharacter::OnDamageTaken(float Damage)
 
 void AMyProjectCharacter::OnHealed(float Heal)
 {
-	PlayerCurrentHP += Heal;
+	if (PlayerCurrentHP >= PlayerBaseHP)
+	{
+		return;
+	}
+	else if (PlayerCurrentHP + Heal >= PlayerBaseHP)
+	{
+		PlayerCurrentHP = PlayerBaseHP;
+	}
+	else
+	{
+		PlayerCurrentHP += Heal;
+	}
+
 	UE_LOG(LogTemp, Error, TEXT("HP = %f"), PlayerCurrentHP);
 }
 
 void AMyProjectCharacter::KillPlayer_Implementation()
 {
-	if (GEngine)
-	{
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("You're Dead!!!!"), true, FVector2D(10.f,10.f));
-		}
-	}
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("You're Dead!!!!"), true, FVector2D(10.f,10.f));
 }
 
 void AMyProjectCharacter::PickUp(EItemClass Item)
 {
 	if (Item == EItemClass::SPEED_BOOSTER)
 	{
-		GetCharacterMovement()->MaxWalkSpeed *= SpeedMultipier;
+		GetCharacterMovement()->MaxWalkSpeed = PlayerBaseWalkSpeed * SpeedMultipier;
 		if (!GetWorldTimerManager().IsTimerActive(BoostTimeHandle))
 		{
 			BoostCountDown = BoostDuration;
@@ -177,7 +184,7 @@ void AMyProjectCharacter::PickUp(EItemClass Item)
 
 void AMyProjectCharacter::ResetBoost()
 {
-	GetCharacterMovement()->MaxWalkSpeed = 600.f;
+	GetCharacterMovement()->MaxWalkSpeed = PlayerBaseWalkSpeed;
 }
 
 void AMyProjectCharacter::CheckBoostTimeLeft()

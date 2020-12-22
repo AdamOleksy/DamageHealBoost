@@ -30,6 +30,10 @@ class AMyProjectCharacter : public ACharacter
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement Parameters", meta = (AllowPrivateAccess = "true"))
 	float SpeedMultipier = 1.f;
 
+	/* Use to boost set in editor */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement Parameters", meta = (AllowPrivateAccess = "true"))
+	float PlayerBaseWalkSpeed = 600.f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player", meta = (AllowPrivateAccess = "true"))
 	float PlayerBaseHP = 100.f;
 
