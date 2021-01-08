@@ -8,6 +8,15 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "DrawDebugHelpers.h"
+#include "DestructibleCharacter.h"
+#include "Math/Vector.h"
+#include "Items/ActorGrenade.h"
+#include "Items/ItemBase.h"
+#include "Items/Inventory.h"
+#include "Net/UnrealNetwork.h"
+#include "Trading/Shop.h"
+
 
 //////////////////////////////////////////////////////////////////////////
 // AMyProjectCharacter
@@ -48,6 +57,13 @@ AMyProjectCharacter::AMyProjectCharacter()
 	// are set in the derived blueprint asset named MyCharacter (to avoid direct content references in C++)
 
 	PlayerCurrentHP = PlayerBaseHP;
+
+	GrenadeSpawnPoint = CreateDefaultSubobject<USceneComponent>(TEXT("Grenade spawn"));
+	GrenadeSpawnPoint->SetupAttachment(RootComponent);
+
+	CharacterInventory = CreateDefaultSubobject<UInventory>(TEXT("Inventory"));
+
+	bReplicates = true;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -62,6 +78,12 @@ void AMyProjectCharacter::SetupPlayerInputComponent(class UInputComponent* Playe
 
 	PlayerInputComponent->BindAxis("MoveForward", this, &AMyProjectCharacter::MoveForward);
 	PlayerInputComponent->BindAxis("MoveRight", this, &AMyProjectCharacter::MoveRight);
+
+	PlayerInputComponent->BindAction("PlayerAttack", IE_Pressed, this, &AMyProjectCharacter::PlayerAttack);
+
+	PlayerInputComponent->BindAction("Throw", IE_Pressed, this, &AMyProjectCharacter::Throw);
+
+	PlayerInputComponent->BindAction("InventoryOnOff", IE_Pressed, this, &AMyProjectCharacter::InventoryOnOff);
 
 	// We have 2 versions of the rotation bindings to handle different kinds of devices differently
 	// "turn" handles devices that provide an absolute delta, such as a mouse.
@@ -161,12 +183,12 @@ void AMyProjectCharacter::OnHealed(float Heal)
 		PlayerCurrentHP += Heal;
 	}
 
-	UE_LOG(LogTemp, Error, TEXT("HP = %f"), PlayerCurrentHP);
 }
 
 void AMyProjectCharacter::KillPlayer_Implementation()
 {
-	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("You're Dead!!!!"), true, FVector2D(10.f,10.f));
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, (TEXT("Player %s is dead"), GetName() ), true, FVector2D(1.f,1.f));
+	Destroy();
 }
 
 void AMyProjectCharacter::PickUp(EItemClass Item)
@@ -198,4 +220,167 @@ void AMyProjectCharacter::CheckBoostTimeLeft()
 	{
 		GetWorldTimerManager().SetTimer(BoostTimeHandle, this, &AMyProjectCharacter::CheckBoostTimeLeft, BoostCountDownInterval, false);
 	}
+}
+
+void AMyProjectCharacter::PlayerAttack()
+{
+	GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("Player attack!!!!"), true, FVector2D(1.f, 1.f));
+	FVector InitLocation = GetActorLocation();
+	FVector PlayerDirectionVector = GetActorForwardVector();
+	FCollisionShape CollisionShere = FCollisionShape::MakeSphere(500.f);
+	//DrawDebugSphere(GetWorld(), InitLocation, CollisionShere.GetSphereRadius(), 10, FColor::Red, false, 1.f);
+	TArray<FHitResult> MultipleHits;
+	bool isHit = GetWorld()->SweepMultiByChannel(MultipleHits, InitLocation, InitLocation, FQuat::Identity, ECC_MAX, CollisionShere);
+
+	if (isHit)
+	{
+
+		for (auto &Hit : MultipleHits)
+		{
+			ADestructibleCharacter* DC = Cast<ADestructibleCharacter>(Hit.GetActor());
+			if (DC)
+			{
+				FVector PlayerToEnemyVector = GetActorLocation() - DC->GetActorLocation();
+
+				PlayerToEnemyVector.Normalize(0);
+				float Dot = FVector::DotProduct(PlayerDirectionVector, PlayerToEnemyVector);
+				float angle = FMath::RadiansToDegrees(FMath::Acos(Dot));
+				if (angle + PlayerAttackTolerance >= 180.f)
+				{
+					DC->OnDamageTaken(10.f);
+				}
+			}
+			
+		}
+	}
+
+
+}
+
+void AMyProjectCharacter::GetLifetimeReplicatedProps(
+	TArray < FLifetimeProperty >& OutLifetimeProps
+) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AMyProjectCharacter, bIsTrowing);
+}
+
+
+void AMyProjectCharacter::PickUpItem(AItemBase* Item)
+{
+	if (Item && CharacterInventory)
+	{
+		CharacterInventory->AddItemToInventory(Item);
+	}
+}
+
+void AMyProjectCharacter::ThrowOutItem(AItemBase* Item)
+{
+	if (Item && CharacterInventory)
+	{
+		CharacterInventory->RemoveFromInventory(Item);
+	}
+}
+
+void AMyProjectCharacter::UseItem(AItemBase* Item)
+{
+	if (bIsShoping && Item)
+	{
+		if (ActiveShop)
+		{
+			Money += Item->ItemCost;
+			CharacterInventory->RemoveFromInventory(Item);
+			UE_LOG(LogTemp, Warning, TEXT("you have %i"), Money);
+			ActiveShop->CharacterInventory->AddItemToInventory(Item);
+		}
+	}
+	else if (!bIsShoping && Item)
+	{
+		Item->Use(this);
+		Item->OnUse(this);
+	}
+}
+
+void AMyProjectCharacter::InventoryOnOff()
+{
+	
+	if (bIsShoping)
+	{
+		CharacterInventory->ShowShopingInventory();
+		return;
+	}
+
+	bIsInventoryActivated = !bIsInventoryActivated;
+
+	if (bIsInventoryActivated && CharacterInventory)
+	{
+		CharacterInventory->ShowInventory();
+	}
+	else if (!bIsInventoryActivated && CharacterInventory)
+	{
+		CharacterInventory->HideInventory();
+	}
+}
+
+void AMyProjectCharacter::Throw_Implementation()
+{
+
+}
+
+
+bool AMyProjectCharacter::Throw_Validate()
+{
+	bIsTrowing = !bIsTrowing;
+
+	SpawnGrenade_Validate();
+	
+	return true;
+}
+
+void AMyProjectCharacter::PlayThrowAnimation_Implementation()
+{
+
+}
+
+bool AMyProjectCharacter::PlayThrowAnimation_Validate()
+{
+	if (ThrowAnimationRef)
+	{
+		PlayAnimMontage(ThrowAnimationRef, 1.f, NAME_None);
+	}
+	
+	return true;
+}
+
+
+void AMyProjectCharacter::SpawnGrenade_Implementation()
+{
+
+}
+
+bool AMyProjectCharacter::SpawnGrenade_Validate()
+{
+	FVector SpawnLocation = GrenadeSpawnPoint->GetComponentLocation();
+	FRotator SpawnRotation = GrenadeSpawnPoint->GetComponentRotation();
+
+	AActorGrenade* TempProjetile = GetWorld()->SpawnActor<AActorGrenade>(GrenadeBP, SpawnLocation, SpawnRotation);
+
+	return true;
+}
+
+void AMyProjectCharacter::ResetIsTrowing()
+{
+	bIsTrowing = false;
+}
+
+void AMyProjectCharacter::SetActiveShop(AShop* NewShop)
+{
+	ActiveShop = NewShop;
+	bIsShoping = true;
+}
+
+void AMyProjectCharacter::LeaveShop()
+{
+	ActiveShop = nullptr;
+	bIsShoping = false;
 }

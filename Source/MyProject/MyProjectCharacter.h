@@ -6,12 +6,16 @@
 #include "GameFramework/Character.h"
 #include "MyProjectCharacter.generated.h"
 
+
 UENUM(BlueprintType)
 enum class EItemClass : uint8
 {
 	NONE,
 	SPEED_BOOSTER
 };
+
+class AActorGrenade;
+class AItemBase;
 
 UCLASS(config=Game)
 class AMyProjectCharacter : public ACharacter
@@ -25,6 +29,9 @@ class AMyProjectCharacter : public ACharacter
 	/** Follow camera */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	class UCameraComponent* FollowCamera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	USceneComponent* GrenadeSpawnPoint;
 	
 	/* Use to boost set in editor */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement Parameters", meta = (AllowPrivateAccess = "true"))
@@ -49,6 +56,8 @@ class AMyProjectCharacter : public ACharacter
 
 	float BoostCountDownInterval = 0.1f;
 
+	float PlayerAttackTolerance = 45.f;
+
 	/* Used to handle counting down boost */
 	FTimerHandle BoostTimeHandle;
 
@@ -58,29 +67,10 @@ class AMyProjectCharacter : public ACharacter
 	/*To check if boost time have end*/
 	void CheckBoostTimeLeft();
 
-public:
-	AMyProjectCharacter();
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player", meta = (AllowPrivateAccess = "true"))
+	class UInventory* CharacterInventory;
 
-	/** Base turn rate, in deg/sec. Other scaling may affect final turn rate. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Camera)
-	float BaseTurnRate;
-
-	/** Base look up/down rate, in deg/sec. Other scaling may affect final rate. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Camera)
-	float BaseLookUpRate;
-
-	UFUNCTION(BlueprintCallable)
-	void PickUp(EItemClass Item);
-
-	UFUNCTION(BlueprintCallable)
-	void OnDamageTaken(float Damage);
-
-	UFUNCTION(BlueprintCallable)
-	void OnHealed(float Heal);
-
-	UFUNCTION(BlueprintNativeEvent)
-	void KillPlayer();
-	void KillPlayer_Implementation();
+	bool bIsInventoryActivated = false;
 
 protected:
 
@@ -111,15 +101,94 @@ protected:
 	/** Handler for when a touch input stops. */
 	void TouchStopped(ETouchIndex::Type FingerIndex, FVector Location);
 
-protected:
 	// APawn interface
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-	// End of APawn interface
+
+	void InventoryOnOff();
 
 public:
+	AMyProjectCharacter();
+
+	/** Base turn rate, in deg/sec. Other scaling may affect final turn rate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Camera)
+	float BaseTurnRate;
+
+	/** Base look up/down rate, in deg/sec. Other scaling may affect final rate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Camera)
+	float BaseLookUpRate;
+
+	UFUNCTION(BlueprintCallable)
+	void PickUp(EItemClass Item);
+
+	UFUNCTION(BlueprintCallable)
+	void OnDamageTaken(float Damage);
+
+	UFUNCTION(BlueprintCallable)
+	void OnHealed(float Heal);
+
+	UFUNCTION(BlueprintNativeEvent)
+	void KillPlayer();
+	void KillPlayer_Implementation();
+
+	UFUNCTION(BlueprintCallable)
+	void PlayerAttack();
+
+	UPROPERTY(Replicated, EditAnywhere, Category = "Items", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<AActorGrenade> GrenadeBP;
+
+	UFUNCTION(BlueprintCallable)
+	void PickUpItem(AItemBase* Item);
+
+	UFUNCTION(BlueprintCallable)
+	void ThrowOutItem(AItemBase* Item);
+
 	/** Returns CameraBoom subobject **/
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	/** Returns FollowCamera subobject **/
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+
+	//UFUNCTION(NetMulticast, Reliable, WithValidation)
+	UFUNCTION(unreliable, server, WithValidation)
+	void Throw();
+	void Throw_Implementation();
+	bool Throw_Validate();
+
+	UFUNCTION(BlueprintCallable, Category = "Items")
+	void UseItem(class AItemBase* Item);
+
+	UPROPERTY(ReplicatedUsing = PlayThrowAnimation)
+	bool bIsTrowing = false;
+
+	FTimerHandle ResetTrowingTimer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations")
+	UAnimMontage* ThrowAnimationRef;
+
+	void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	UFUNCTION(Server, NetMulticast, Reliable, WithValidation)
+	void SpawnGrenade();
+
+	UFUNCTION(Client, Reliable, WithValidation)
+	void PlayThrowAnimation();
+	void PlayThrowAnimation_Implementation();
+	bool PlayThrowAnimation_Validate();
+	
+	void ResetIsTrowing();
+
+	UPROPERTY()
+	bool bIsShoping;
+
+	UPROPERTY()
+	class AShop* ActiveShop;
+
+	UFUNCTION()
+	void SetActiveShop(AShop* NewShop);
+
+	UFUNCTION()
+	void LeaveShop();
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Money")
+	int32 Money = 1000;
 };
 
